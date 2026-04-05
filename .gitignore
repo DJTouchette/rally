@@ -1,0 +1,6 @@
+/rally
+.rally/tickets/
+.rally/state.json
+*.test
+*.out
+*.prof
