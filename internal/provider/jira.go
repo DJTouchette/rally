@@ -119,12 +119,21 @@ func (j *Jira) RefreshToken(ctx context.Context, cfg OAuthConfig, refreshToken s
 		return nil, fmt.Errorf("decoding refresh response: %w", err)
 	}
 
-	return &TokenSet{
+	ts := &TokenSet{
 		AccessToken:  tokenResp.AccessToken,
 		RefreshToken: tokenResp.RefreshToken,
 		ExpiresAt:    time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second),
 		Scope:        tokenResp.Scope,
-	}, nil
+	}
+
+	// Re-fetch cloud ID so it's preserved across token refreshes.
+	cloudID, err := j.fetchCloudID(ctx, ts.AccessToken)
+	if err != nil {
+		return nil, fmt.Errorf("fetching cloud ID after refresh: %w", err)
+	}
+	ts.CloudID = cloudID
+
+	return ts, nil
 }
 
 func (j *Jira) FetchAssigned(ctx context.Context, token string, opts FetchOpts) ([]model.Ticket, error) {
@@ -138,40 +147,53 @@ func (j *Jira) FetchAssigned(ctx context.Context, token string, opts FetchOpts) 
 		jql = fmt.Sprintf("project = %s AND %s", opts.Project, jql)
 	}
 
-	maxResults := 50
-	if opts.MaxResults > 0 {
-		maxResults = opts.MaxResults
+	pageSize := 50
+	if opts.MaxResults > 0 && opts.MaxResults < pageSize {
+		pageSize = opts.MaxResults
 	}
 
-	apiURL := fmt.Sprintf("https://api.atlassian.com/ex/jira/%s/rest/api/3/search?jql=%s&maxResults=%d&fields=summary,description,status,priority,issuetype,project,labels,creator,created,updated,duedate,parent",
-		cloudID, url.QueryEscape(jql), maxResults)
+	var tickets []model.Ticket
+	startAt := 0
 
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("creating search request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/json")
+	for {
+		apiURL := fmt.Sprintf("https://api.atlassian.com/ex/jira/%s/rest/api/3/search?jql=%s&startAt=%d&maxResults=%d&fields=summary,description,status,priority,issuetype,project,labels,creator,created,updated,duedate,parent",
+			cloudID, url.QueryEscape(jql), startAt, pageSize)
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("search request: %w", err)
-	}
-	defer resp.Body.Close()
+		req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("creating search request: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Accept", "application/json")
 
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("search failed (%d): %s", resp.StatusCode, respBody)
-	}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("search request: %w", err)
+		}
+		defer resp.Body.Close()
 
-	var searchResult jiraSearchResult
-	if err := json.NewDecoder(resp.Body).Decode(&searchResult); err != nil {
-		return nil, fmt.Errorf("decoding search response: %w", err)
-	}
+		if resp.StatusCode != http.StatusOK {
+			respBody, _ := io.ReadAll(resp.Body)
+			return nil, fmt.Errorf("search failed (%d): %s", resp.StatusCode, respBody)
+		}
 
-	tickets := make([]model.Ticket, 0, len(searchResult.Issues))
-	for _, issue := range searchResult.Issues {
-		tickets = append(tickets, j.normalizeIssue(issue))
+		var searchResult jiraSearchResult
+		if err := json.NewDecoder(resp.Body).Decode(&searchResult); err != nil {
+			return nil, fmt.Errorf("decoding search response: %w", err)
+		}
+
+		for _, issue := range searchResult.Issues {
+			tickets = append(tickets, j.normalizeIssue(issue))
+		}
+
+		startAt += len(searchResult.Issues)
+		if startAt >= searchResult.Total || len(searchResult.Issues) == 0 {
+			break
+		}
+		if opts.MaxResults > 0 && len(tickets) >= opts.MaxResults {
+			tickets = tickets[:opts.MaxResults]
+			break
+		}
 	}
 
 	return tickets, nil
@@ -220,17 +242,30 @@ func (j *Jira) UpdateStatus(ctx context.Context, token string, providerID string
 		return fmt.Errorf("decoding transitions: %w", err)
 	}
 
-	// Find the transition that matches our target status category
+	// Find the best transition matching our target status category.
+	// When multiple transitions lead to the same category, prefer one whose
+	// name aligns with the Rally status (e.g. "In Progress" for in_progress).
 	targetCategory := statusToJiraCategory(status)
+	targetHint := statusToJiraNameHint(status)
 	var transitionID string
 	for _, tr := range transResult.Transitions {
-		if tr.To.StatusCategory.Key == targetCategory {
+		if tr.To.StatusCategory.Key != targetCategory {
+			continue
+		}
+		if transitionID == "" {
+			transitionID = tr.ID // take first match as fallback
+		}
+		if targetHint != "" && strings.EqualFold(tr.Name, targetHint) {
 			transitionID = tr.ID
-			break
+			break // exact name match is the best we can do
 		}
 	}
 	if transitionID == "" {
-		return fmt.Errorf("no transition found for status %q (target category: %s)", status, targetCategory)
+		available := make([]string, 0, len(transResult.Transitions))
+		for _, tr := range transResult.Transitions {
+			available = append(available, fmt.Sprintf("%s→%s", tr.Name, tr.To.StatusCategory.Key))
+		}
+		return fmt.Errorf("no transition found for status %q (target category: %s, available: %s)", status, targetCategory, strings.Join(available, ", "))
 	}
 
 	// Execute the transition
@@ -341,7 +376,8 @@ func (j *Jira) normalizeIssue(issue jiraIssue) model.Ticket {
 }
 
 // extractTextFromADF extracts plain text from Jira's Atlassian Document Format.
-// ADF is a nested JSON structure; we walk it and concatenate text nodes.
+// ADF is a nested JSON structure; we walk it and render block-level elements
+// (paragraphs, headings, lists, code blocks) with appropriate separators.
 func extractTextFromADF(adf json.RawMessage) string {
 	var doc struct {
 		Content []adfNode `json:"content"`
@@ -351,9 +387,11 @@ func extractTextFromADF(adf json.RawMessage) string {
 	}
 
 	var b strings.Builder
-	for _, node := range doc.Content {
-		extractADFText(&b, node)
-		b.WriteString("\n")
+	for i, node := range doc.Content {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		extractADFBlock(&b, node, "")
 	}
 	return strings.TrimSpace(b.String())
 }
@@ -362,20 +400,96 @@ type adfNode struct {
 	Type    string          `json:"type"`
 	Text    string          `json:"text"`
 	Content json.RawMessage `json:"content"`
+	Attrs   json.RawMessage `json:"attrs"`
+	Marks   []adfMark       `json:"marks"`
 }
 
-func extractADFText(b *strings.Builder, node adfNode) {
+type adfMark struct {
+	Type  string          `json:"type"`
+	Attrs json.RawMessage `json:"attrs"`
+}
+
+// extractADFBlock renders a block-level ADF node (paragraph, heading, list, code block, etc.).
+func extractADFBlock(b *strings.Builder, node adfNode, listPrefix string) {
+	switch node.Type {
+	case "heading":
+		extractADFInline(b, node)
+		b.WriteString("\n")
+
+	case "paragraph":
+		if listPrefix != "" {
+			b.WriteString(listPrefix)
+		}
+		extractADFInline(b, node)
+		b.WriteString("\n")
+
+	case "bulletList":
+		children := adfChildren(node)
+		for _, child := range children {
+			extractADFBlock(b, child, "- ")
+		}
+
+	case "orderedList":
+		children := adfChildren(node)
+		for i, child := range children {
+			extractADFBlock(b, child, fmt.Sprintf("%d. ", i+1))
+		}
+
+	case "listItem":
+		children := adfChildren(node)
+		for _, child := range children {
+			extractADFBlock(b, child, listPrefix)
+		}
+
+	case "codeBlock":
+		b.WriteString("```\n")
+		extractADFInline(b, node)
+		b.WriteString("\n```\n")
+
+	case "blockquote":
+		var qb strings.Builder
+		children := adfChildren(node)
+		for _, child := range children {
+			extractADFBlock(&qb, child, "")
+		}
+		for _, line := range strings.Split(strings.TrimRight(qb.String(), "\n"), "\n") {
+			b.WriteString("> ")
+			b.WriteString(line)
+			b.WriteString("\n")
+		}
+
+	default:
+		// Unknown block type — extract inline text as fallback.
+		extractADFInline(b, node)
+		if node.Content != nil {
+			b.WriteString("\n")
+		}
+	}
+}
+
+// extractADFInline walks a node's children and concatenates inline text content.
+func extractADFInline(b *strings.Builder, node adfNode) {
 	if node.Text != "" {
 		b.WriteString(node.Text)
 	}
-	if node.Content != nil {
-		var children []adfNode
-		if err := json.Unmarshal(node.Content, &children); err == nil {
-			for _, child := range children {
-				extractADFText(b, child)
-			}
+	for _, child := range adfChildren(node) {
+		if child.Type == "hardBreak" {
+			b.WriteString("\n")
+			continue
 		}
+		extractADFInline(b, child)
 	}
+}
+
+func adfChildren(node adfNode) []adfNode {
+	if node.Content == nil {
+		return nil
+	}
+	var children []adfNode
+	if err := json.Unmarshal(node.Content, &children); err != nil {
+		return nil
+	}
+	return children
 }
 
 func normalizeJiraStatus(categoryKey string) model.Status {
@@ -421,11 +535,33 @@ func statusToJiraCategory(s model.Status) string {
 	}
 }
 
+// statusToJiraNameHint returns a common Jira transition/status name that best
+// matches the Rally status. Used to pick the best transition when multiple
+// transitions lead to the same status category.
+func statusToJiraNameHint(s model.Status) string {
+	switch s {
+	case model.StatusTodo:
+		return "To Do"
+	case model.StatusBacklog:
+		return "Backlog"
+	case model.StatusInProgress:
+		return "In Progress"
+	case model.StatusInReview:
+		return "In Review"
+	case model.StatusDone:
+		return "Done"
+	default:
+		return ""
+	}
+}
+
 // Jira API response types
 
 type jiraSearchResult struct {
-	Issues []jiraIssue `json:"issues"`
-	Total  int         `json:"total"`
+	Issues     []jiraIssue `json:"issues"`
+	StartAt    int         `json:"startAt"`
+	MaxResults int         `json:"maxResults"`
+	Total      int         `json:"total"`
 }
 
 type jiraIssue struct {

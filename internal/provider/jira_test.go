@@ -104,29 +104,122 @@ func TestNormalizeIssue(t *testing.T) {
 }
 
 func TestExtractTextFromADF(t *testing.T) {
-	adf := json.RawMessage(`{
-		"type": "doc",
-		"content": [
-			{
-				"type": "paragraph",
+	tests := []struct {
+		name string
+		adf  json.RawMessage
+		want string
+	}{
+		{
+			name: "paragraphs",
+			adf: json.RawMessage(`{
+				"type": "doc",
 				"content": [
-					{"type": "text", "text": "Hello "},
-					{"type": "text", "text": "world"}
+					{
+						"type": "paragraph",
+						"content": [
+							{"type": "text", "text": "Hello "},
+							{"type": "text", "text": "world"}
+						]
+					},
+					{
+						"type": "paragraph",
+						"content": [
+							{"type": "text", "text": "Second paragraph"}
+						]
+					}
 				]
-			},
-			{
-				"type": "paragraph",
+			}`),
+			want: "Hello world\n\nSecond paragraph",
+		},
+		{
+			name: "bullet list",
+			adf: json.RawMessage(`{
+				"type": "doc",
 				"content": [
-					{"type": "text", "text": "Second paragraph"}
+					{
+						"type": "bulletList",
+						"content": [
+							{"type": "listItem", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "item one"}]}]},
+							{"type": "listItem", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "item two"}]}]}
+						]
+					}
 				]
-			}
-		]
-	}`)
+			}`),
+			want: "- item one\n- item two",
+		},
+		{
+			name: "ordered list",
+			adf: json.RawMessage(`{
+				"type": "doc",
+				"content": [
+					{
+						"type": "orderedList",
+						"content": [
+							{"type": "listItem", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "first"}]}]},
+							{"type": "listItem", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "second"}]}]}
+						]
+					}
+				]
+			}`),
+			want: "1. first\n2. second",
+		},
+		{
+			name: "code block",
+			adf: json.RawMessage(`{
+				"type": "doc",
+				"content": [
+					{
+						"type": "codeBlock",
+						"content": [
+							{"type": "text", "text": "fmt.Println(\"hi\")"}
+						]
+					}
+				]
+			}`),
+			want: "```\nfmt.Println(\"hi\")\n```",
+		},
+		{
+			name: "blockquote",
+			adf: json.RawMessage(`{
+				"type": "doc",
+				"content": [
+					{
+						"type": "blockquote",
+						"content": [
+							{"type": "paragraph", "content": [{"type": "text", "text": "quoted text"}]}
+						]
+					}
+				]
+			}`),
+			want: "> quoted text",
+		},
+		{
+			name: "mixed content",
+			adf: json.RawMessage(`{
+				"type": "doc",
+				"content": [
+					{"type": "heading", "content": [{"type": "text", "text": "Title"}]},
+					{"type": "paragraph", "content": [{"type": "text", "text": "Body text"}]},
+					{
+						"type": "bulletList",
+						"content": [
+							{"type": "listItem", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "a"}]}]},
+							{"type": "listItem", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "b"}]}]}
+						]
+					}
+				]
+			}`),
+			want: "Title\n\nBody text\n\n- a\n- b",
+		},
+	}
 
-	got := extractTextFromADF(adf)
-	want := "Hello world\nSecond paragraph"
-	if got != want {
-		t.Errorf("extractTextFromADF:\ngot  %q\nwant %q", got, want)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractTextFromADF(tt.adf)
+			if got != tt.want {
+				t.Errorf("extractTextFromADF:\ngot  %q\nwant %q", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -146,6 +239,27 @@ func TestStatusToJiraCategory(t *testing.T) {
 		got := statusToJiraCategory(tt.status)
 		if got != tt.want {
 			t.Errorf("statusToJiraCategory(%q) = %q, want %q", tt.status, got, tt.want)
+		}
+	}
+}
+
+func TestStatusToJiraNameHint(t *testing.T) {
+	tests := []struct {
+		status model.Status
+		want   string
+	}{
+		{model.StatusTodo, "To Do"},
+		{model.StatusBacklog, "Backlog"},
+		{model.StatusInProgress, "In Progress"},
+		{model.StatusInReview, "In Review"},
+		{model.StatusDone, "Done"},
+		{model.StatusCancelled, ""},
+	}
+
+	for _, tt := range tests {
+		got := statusToJiraNameHint(tt.status)
+		if got != tt.want {
+			t.Errorf("statusToJiraNameHint(%q) = %q, want %q", tt.status, got, tt.want)
 		}
 	}
 }
