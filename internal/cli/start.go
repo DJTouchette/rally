@@ -51,6 +51,17 @@ func runTransition(ticketID string, status model.Status, localOnly bool) error {
 	oldStatus := target.Status
 	target.Status = status
 
+	switch status {
+	case model.StatusInProgress:
+		if err := store.AddPin(target.ID, ""); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not pin %s: %v\n", target.ID, err)
+		}
+	case model.StatusDone, model.StatusCancelled:
+		if err := store.RemovePin(target.ID); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not unpin %s: %v\n", target.ID, err)
+		}
+	}
+
 	// Write updated markdown
 	ticketsDir := store.TicketsDir()
 	filename := markdown.Filename(*target)

@@ -20,6 +20,9 @@ func NewRootCmd(version string) *cobra.Command {
 		newStartCmd(),
 		newDoneCmd(),
 		newStatusCmd(),
+		newPinCmd(),
+		newUnpinCmd(),
+		newPinnedCmd(),
 	)
 
 	return cmd
