@@ -29,7 +29,7 @@ func newListCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&listStatus, "status", "", "filter by status (todo, in_progress, done, ...)")
 	cmd.Flags().StringVar(&listPriority, "priority", "", "filter by priority (urgent, high, medium, low)")
-	cmd.Flags().StringVar(&listProvider, "provider", "", "filter by provider (jira, linear)")
+	cmd.Flags().StringVar(&listProvider, "provider", "", "filter by provider (jira, linear, github, asana)")
 	cmd.Flags().BoolVar(&listJSON, "json", false, "output as JSON")
 
 	return cmd
