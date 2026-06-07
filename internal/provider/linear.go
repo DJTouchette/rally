@@ -38,14 +38,30 @@ func (l *Linear) AuthURL(clientID, redirectURI, state string) string {
 }
 
 func (l *Linear) ExchangeCode(ctx context.Context, cfg OAuthConfig, code, redirectURI string) (*TokenSet, error) {
-	body := url.Values{
+	return l.tokenRequest(ctx, url.Values{
 		"grant_type":    {"authorization_code"},
 		"client_id":     {cfg.ClientID},
 		"client_secret": {cfg.ClientSecret},
 		"code":          {code},
 		"redirect_uri":  {redirectURI},
-	}
+	})
+}
 
+func (l *Linear) RefreshToken(ctx context.Context, cfg OAuthConfig, refreshToken string) (*TokenSet, error) {
+	// Since Linear's April 2026 migration, access tokens expire in 24h and the
+	// token endpoint issues refresh tokens. A successful refresh returns a new
+	// access token AND a new refresh token (the old pair is invalidated).
+	return l.tokenRequest(ctx, url.Values{
+		"grant_type":    {"refresh_token"},
+		"client_id":     {cfg.ClientID},
+		"client_secret": {cfg.ClientSecret},
+		"refresh_token": {refreshToken},
+	})
+}
+
+// tokenRequest performs an OAuth token request (code exchange or refresh) and
+// parses the response.
+func (l *Linear) tokenRequest(ctx context.Context, body url.Values) (*TokenSet, error) {
 	req, err := http.NewRequestWithContext(ctx, "POST", linearTokenURL, strings.NewReader(body.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("creating token request: %w", err)
@@ -54,44 +70,36 @@ func (l *Linear) ExchangeCode(ctx context.Context, cfg OAuthConfig, code, redire
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("token exchange: %w", err)
+		return nil, fmt.Errorf("token request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("token exchange failed (%d): %s", resp.StatusCode, respBody)
+		return nil, fmt.Errorf("token request failed (%d): %s", resp.StatusCode, respBody)
 	}
 
 	var tokenResp struct {
-		AccessToken string `json:"access_token"`
-		ExpiresIn   int    `json:"expires_in"`
-		Scope       string `json:"scope"`
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int    `json:"expires_in"`
+		Scope        string `json:"scope"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
 		return nil, fmt.Errorf("decoding token response: %w", err)
 	}
 
-	// Linear access tokens are long-lived (~10 years) and the standard OAuth
-	// flow does not issue refresh tokens. Fall back to a far-future expiry when
-	// the server omits expires_in so the sync flow never tries to refresh.
-	expiresAt := time.Now().Add(10 * 365 * 24 * time.Hour)
+	expiresAt := time.Now().Add(24 * time.Hour) // Linear default
 	if tokenResp.ExpiresIn > 0 {
 		expiresAt = time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second)
 	}
 
 	return &TokenSet{
-		AccessToken: tokenResp.AccessToken,
-		ExpiresAt:   expiresAt,
-		Scope:       tokenResp.Scope,
+		AccessToken:  tokenResp.AccessToken,
+		RefreshToken: tokenResp.RefreshToken,
+		ExpiresAt:    expiresAt,
+		Scope:        tokenResp.Scope,
 	}, nil
-}
-
-func (l *Linear) RefreshToken(_ context.Context, _ OAuthConfig, _ string) (*TokenSet, error) {
-	// Linear's standard OAuth flow issues long-lived tokens without a refresh
-	// token, so there is nothing to refresh. Re-running `rally connect linear`
-	// is the recovery path if a token is ever revoked.
-	return nil, fmt.Errorf("linear tokens are long-lived and cannot be refreshed; run `rally connect linear` again if access was revoked")
 }
 
 // --- GraphQL types ---

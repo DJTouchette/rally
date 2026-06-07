@@ -172,6 +172,12 @@ func DefaultSecretsForProvider(providerName string) []Secret {
 				Required:    true,
 			},
 			{
+				Name:        "RALLY_LINEAR_REFRESH",
+				Description: "Linear OAuth refresh token (access tokens expire after 24h)",
+				Domains:     []string{"api.linear.app"},
+				Required:    true,
+			},
+			{
 				Name:        "RALLY_LINEAR_CLIENT_ID",
 				Description: "Linear OAuth application client ID",
 				Domains:     []string{"linear.app"},

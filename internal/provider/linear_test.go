@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/djtouchette/rally/internal/model"
 )
@@ -45,6 +46,52 @@ func TestNormalizeLinearPriority(t *testing.T) {
 		if got := normalizeLinearPriority(in); got != want {
 			t.Errorf("normalizeLinearPriority(%d) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestLinearTokenExchangeAndRefresh(t *testing.T) {
+	var lastGrant, lastCode, lastRefresh string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		lastGrant = r.Form.Get("grant_type")
+		lastCode = r.Form.Get("code")
+		lastRefresh = r.Form.Get("refresh_token")
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"access_token":"at-new","refresh_token":"rt-new","token_type":"Bearer","expires_in":86399,"scope":"read,write"}`)
+	}))
+	defer srv.Close()
+	orig := linearTokenURL
+	linearTokenURL = srv.URL
+	defer func() { linearTokenURL = orig }()
+
+	l := &Linear{}
+	cfg := OAuthConfig{ClientID: "cid", ClientSecret: "csec"}
+
+	// Code exchange captures both tokens and a ~24h expiry.
+	ts, err := l.ExchangeCode(context.Background(), cfg, "the-code", "http://localhost/cb")
+	if err != nil {
+		t.Fatalf("ExchangeCode: %v", err)
+	}
+	if lastGrant != "authorization_code" || lastCode != "the-code" {
+		t.Errorf("exchange sent grant=%q code=%q", lastGrant, lastCode)
+	}
+	if ts.AccessToken != "at-new" || ts.RefreshToken != "rt-new" {
+		t.Errorf("exchange tokens: access=%q refresh=%q", ts.AccessToken, ts.RefreshToken)
+	}
+	if d := time.Until(ts.ExpiresAt); d < 23*time.Hour || d > 25*time.Hour {
+		t.Errorf("expiry = %v, want ~24h", d)
+	}
+
+	// Refresh uses the refresh_token grant and returns the rotated pair.
+	ts2, err := l.RefreshToken(context.Background(), cfg, "rt-old")
+	if err != nil {
+		t.Fatalf("RefreshToken: %v", err)
+	}
+	if lastGrant != "refresh_token" || lastRefresh != "rt-old" {
+		t.Errorf("refresh sent grant=%q refresh=%q", lastGrant, lastRefresh)
+	}
+	if ts2.AccessToken != "at-new" || ts2.RefreshToken != "rt-new" {
+		t.Errorf("refresh tokens: access=%q refresh=%q", ts2.AccessToken, ts2.RefreshToken)
 	}
 }
 
