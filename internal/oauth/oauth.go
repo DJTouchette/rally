@@ -1,14 +1,14 @@
 package oauth
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"net"
-	"net/http"
+	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 )
 
 // CallbackResult holds the result of an OAuth callback.
@@ -18,67 +18,35 @@ type CallbackResult struct {
 	Error string
 }
 
-// RunCallbackServer starts a localhost HTTP server, opens the browser to authURL,
-// and waits for the OAuth callback. Returns the authorization code.
-func RunCallbackServer(ctx context.Context, authURL string) (*CallbackResult, error) {
-	resultCh := make(chan CallbackResult, 1)
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
-		result := CallbackResult{
-			Code:  r.URL.Query().Get("code"),
-			State: r.URL.Query().Get("state"),
-			Error: r.URL.Query().Get("error"),
-		}
-
-		if result.Error != "" {
-			fmt.Fprintf(w, "<html><body><h2>Authorization failed</h2><p>%s</p><p>You can close this tab.</p></body></html>", result.Error)
-		} else {
-			fmt.Fprint(w, "<html><body><h2>Authorization successful</h2><p>You can close this tab and return to the terminal.</p></body></html>")
-		}
-		resultCh <- result
-	})
-
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return nil, fmt.Errorf("starting callback server: %w", err)
-	}
-
-	server := &http.Server{Handler: mux}
-	go server.Serve(listener)
-	defer server.Shutdown(ctx)
-
-	port := listener.Addr().(*net.TCPAddr).Port
-	_ = port // port is embedded in the redirectURI passed to authURL
-
-	if err := OpenBrowser(authURL); err != nil {
-		fmt.Printf("Could not open browser automatically.\nPlease visit:\n\n  %s\n\n", authURL)
-	}
-
-	select {
-	case result := <-resultCh:
-		if result.Error != "" {
-			return nil, fmt.Errorf("authorization failed: %s", result.Error)
-		}
-		return &result, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-}
-
 // RedirectURI returns the localhost callback URI for a given port.
 func RedirectURI(port int) string {
 	return fmt.Sprintf("http://localhost:%d/callback", port)
 }
 
-// ListenOnFreePort starts a TCP listener on a free port and returns the listener and port.
-func ListenOnFreePort() (net.Listener, int, error) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return nil, 0, fmt.Errorf("listening on free port: %w", err)
+// DefaultCallbackPort is the fixed localhost port rally listens on for the OAuth
+// callback. Providers like Jira and Linear require the redirect_uri (including
+// the port) to match the callback URL registered in the OAuth app exactly, so
+// the port must be stable across runs. Override with RALLY_OAUTH_PORT.
+const DefaultCallbackPort = 8412
+
+// CallbackPort returns the configured callback port — RALLY_OAUTH_PORT if set to
+// a valid port, otherwise DefaultCallbackPort.
+func CallbackPort() int {
+	if v := os.Getenv("RALLY_OAUTH_PORT"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil && p > 0 && p < 65536 {
+			return p
+		}
 	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	return listener, port, nil
+	return DefaultCallbackPort
+}
+
+// ListenOnPort binds a localhost TCP listener on the given fixed port.
+func ListenOnPort(port int) (net.Listener, error) {
+	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		return nil, fmt.Errorf("binding 127.0.0.1:%d: %w", port, err)
+	}
+	return listener, nil
 }
 
 // RandomState generates a random state parameter for OAuth.

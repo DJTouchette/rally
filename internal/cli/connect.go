@@ -64,16 +64,21 @@ func runConnect(cmd *cobra.Command, args []string) error {
 		ClientSecret: clientSecret,
 	}
 
-	// Start callback server
-	listener, port, err := oauth.ListenOnFreePort()
+	// Start callback server on a FIXED port. Jira and Linear require the
+	// redirect_uri (including the port) to match the OAuth app's registered
+	// callback URL exactly, so the port can't be random.
+	port := oauth.CallbackPort()
+	redirectURI := oauth.RedirectURI(port)
+
+	listener, err := oauth.ListenOnPort(port)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w\n\nThe OAuth callback needs the fixed port %d. Free it (or set RALLY_OAUTH_PORT to a port registered as the redirect URI in your %s app).", err, port, providerName)
 	}
 
-	redirectURI := oauth.RedirectURI(port)
 	state := oauth.RandomState()
 	authURL := prov.AuthURL(clientID, redirectURI, state)
 
+	fmt.Printf("Make sure this exact callback URL is registered in your %s OAuth app:\n  %s\n\n", providerName, redirectURI)
 	fmt.Printf("Opening browser for %s authorization...\n", providerName)
 	fmt.Printf("If it doesn't open, visit:\n\n  %s\n\n", authURL)
 

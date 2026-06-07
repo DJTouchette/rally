@@ -38,6 +38,37 @@ rally start PROJ-123
 rally done PROJ-123
 ```
 
+## Setting up a provider (one-time)
+
+Rally authenticates via **OAuth**, so you first create an OAuth app on the
+provider to get a client ID and secret. Both providers require the callback URL
+to match exactly, so rally listens on a **fixed** port — register this redirect
+URI in your app:
+
+```
+http://localhost:8412/callback
+```
+
+(Override the port with `RALLY_OAUTH_PORT` if 8412 is taken — register whatever
+you choose.)
+
+**Jira** — create an OAuth 2.0 (3LO) app at <https://developer.atlassian.com/console/myapps/>,
+add the *Jira API* permission, and set the callback URL above.
+
+**Linear** — create an OAuth application under Settings → API → OAuth
+applications, with `read,write` scope and the callback URL above. (Linear access
+tokens expire after 24h; rally stores the refresh token and renews automatically.)
+
+Then store the credentials in Vaulty and connect:
+
+```bash
+vaulty set RALLY_LINEAR_CLIENT_ID --value <client-id> --domains linear.app
+vaulty set RALLY_LINEAR_CLIENT_SECRET --value <client-secret> --domains linear.app
+vaulty exec --secrets RALLY_LINEAR_CLIENT_ID,RALLY_LINEAR_CLIENT_SECRET -- rally connect linear
+```
+
+The OAuth tokens that come back are stored in Vaulty too — never on disk.
+
 ## Commands
 
 | Command | What it does |
