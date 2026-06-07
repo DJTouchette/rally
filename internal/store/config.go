@@ -193,6 +193,54 @@ func DefaultSecretsForProvider(providerName string) []Secret {
 				Required:    true,
 			},
 		}
+	case "github":
+		return []Secret{
+			{
+				Name:        "RALLY_GITHUB_TOKEN",
+				Description: "GitHub token (personal access token or OAuth access token)",
+				Domains:     []string{"api.github.com", "github.com"},
+				Required:    true,
+			},
+			{
+				Name:        "RALLY_GITHUB_CLIENT_ID",
+				Description: "GitHub OAuth app client ID (OAuth only)",
+				Domains:     []string{"github.com"},
+				Required:    false,
+			},
+			{
+				Name:        "RALLY_GITHUB_CLIENT_SECRET",
+				Description: "GitHub OAuth app client secret (OAuth only)",
+				Domains:     []string{"github.com"},
+				Required:    false,
+			},
+		}
+	case "asana":
+		return []Secret{
+			{
+				Name:        "RALLY_ASANA_TOKEN",
+				Description: "Asana token (personal access token or OAuth access token)",
+				Domains:     []string{"app.asana.com"},
+				Required:    true,
+			},
+			{
+				Name:        "RALLY_ASANA_REFRESH",
+				Description: "Asana OAuth refresh token (access tokens expire after 1h)",
+				Domains:     []string{"app.asana.com"},
+				Required:    false,
+			},
+			{
+				Name:        "RALLY_ASANA_CLIENT_ID",
+				Description: "Asana OAuth app client ID (OAuth only)",
+				Domains:     []string{"app.asana.com"},
+				Required:    false,
+			},
+			{
+				Name:        "RALLY_ASANA_CLIENT_SECRET",
+				Description: "Asana OAuth app client secret (OAuth only)",
+				Domains:     []string{"app.asana.com"},
+				Required:    false,
+			},
+		}
 	default:
 		return nil
 	}

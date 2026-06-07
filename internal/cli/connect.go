@@ -235,8 +235,13 @@ func runConnectAPIKey(cmd *cobra.Command, providerName string, prov provider.Pro
 	}
 
 	tokenDomain := "api.linear.app"
-	if providerName == "jira" {
+	switch providerName {
+	case "jira":
 		tokenDomain = site
+	case "github":
+		tokenDomain = "api.github.com"
+	case "asana":
+		tokenDomain = "app.asana.com"
 	}
 
 	secretName := "RALLY_" + upperName(providerName) + "_TOKEN"

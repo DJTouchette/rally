@@ -2,7 +2,7 @@
 
 Your tickets, as local markdown.
 
-Rally syncs your assigned work items from Jira and Linear into plain markdown files in your repo. Your AI coding agent and you both get to work from a local, git-trackable backlog instead of poking at external APIs mid-task — and the credentials for those APIs never touch disk.
+Rally syncs your assigned work items from Jira, Linear, GitHub, and Asana into plain markdown files in your repo. Your AI coding agent and you both get to work from a local, git-trackable backlog instead of poking at external APIs mid-task — and the credentials for those APIs never touch disk.
 
 Rally is the project-management layer of the [Rivet](https://github.com/djtouchette/rivet) ecosystem. It's a CLI that keeps your backlog local, and it leans on [Vaulty](https://github.com/djtouchette/vaulty) so OAuth tokens are brokered, never stored in plaintext.
 
@@ -55,6 +55,12 @@ rally connect linear --api-key
 
 # Jira — id.atlassian.com → Security → API tokens (needs your email + site)
 rally connect jira --api-key --email you@your-co.com --site your-co.atlassian.net
+
+# GitHub — github.com/settings/tokens (a PAT with repo scope)
+rally connect github --api-key
+
+# Asana — Settings → Apps → Developer apps → Personal access tokens
+rally connect asana --api-key
 ```
 
 You'll be prompted to paste the key; it's verified against the API and saved to
@@ -129,8 +135,10 @@ Rally never stores credentials in `.rally/`. On `connect`, the OAuth tokens are 
 
 | Provider | Status |
 |----------|--------|
-| **Jira** (Cloud) | ✅ Full support — OAuth, pagination, token refresh, ADF descriptions, status transitions, multi-site |
-| **Linear** | ✅ Full support — OAuth, GraphQL assigned-issue sync (paginated), state/priority normalization, status push-back |
+| **Jira** (Cloud) | ✅ OAuth + API token, pagination, token refresh, ADF descriptions, status transitions, multi-site |
+| **Linear** | ✅ OAuth + API key, GraphQL assigned-issue sync (paginated), state/priority normalization, status push-back |
+| **GitHub** Issues | ✅ OAuth + PAT, assigned open issues across repos, label-derived priority, open/close push-back |
+| **Asana** | ✅ OAuth (1h tokens + refresh) + PAT, assigned tasks across workspaces, section→status mapping, complete/incomplete push-back |
 
 ## Building
 

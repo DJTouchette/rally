@@ -76,7 +76,11 @@ func New(name string) (Provider, error) {
 		return &Jira{}, nil
 	case "linear":
 		return &Linear{}, nil
+	case "github":
+		return &GitHub{}, nil
+	case "asana":
+		return &Asana{}, nil
 	default:
-		return nil, fmt.Errorf("unknown provider %q — supported: jira, linear", name)
+		return nil, fmt.Errorf("unknown provider %q — supported: jira, linear, github, asana", name)
 	}
 }
