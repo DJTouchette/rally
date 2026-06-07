@@ -2,7 +2,7 @@
 
 Your tickets, as local markdown.
 
-Rally syncs your assigned work items from Jira (and, soon, Linear) into plain markdown files in your repo. Your AI coding agent and you both get to work from a local, git-trackable backlog instead of poking at external APIs mid-task — and the credentials for those APIs never touch disk.
+Rally syncs your assigned work items from Jira and Linear into plain markdown files in your repo. Your AI coding agent and you both get to work from a local, git-trackable backlog instead of poking at external APIs mid-task — and the credentials for those APIs never touch disk.
 
 Rally is the project-management layer of the [Rivet](https://github.com/djtouchette/rivet) ecosystem. It's a CLI that keeps your backlog local, and it leans on [Vaulty](https://github.com/djtouchette/vaulty) so OAuth tokens are brokered, never stored in plaintext.
 
@@ -76,7 +76,7 @@ Rally never stores credentials in `.rally/`. On `connect`, the OAuth tokens are 
 | Provider | Status |
 |----------|--------|
 | **Jira** (Cloud) | ✅ Full support — OAuth, pagination, token refresh, ADF descriptions, status transitions, multi-site |
-| **Linear** | 🚧 Stubbed — auth URL defined, operations not yet implemented |
+| **Linear** | ✅ Full support — OAuth, GraphQL assigned-issue sync (paginated), state/priority normalization, status push-back |
 
 ## Building
 

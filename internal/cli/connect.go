@@ -38,11 +38,19 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	clientSecret := os.Getenv("RALLY_" + upperName(providerName) + "_CLIENT_SECRET")
 
 	if clientID == "" || clientSecret == "" {
+		// Use the provider's own OAuth domain in the help text.
+		authDomain := "the provider's auth domain"
+		for _, s := range store.DefaultSecretsForProvider(providerName) {
+			if strings.HasSuffix(s.Name, "_CLIENT_ID") && len(s.Domains) > 0 {
+				authDomain = s.Domains[0]
+				break
+			}
+		}
 		fmt.Println("Missing OAuth client credentials.")
 		fmt.Println("")
 		fmt.Println("First, store them in vaulty:")
-		fmt.Printf("  vaulty set RALLY_%s_CLIENT_ID --value <your-client-id> --domains auth.atlassian.com\n", upperName(providerName))
-		fmt.Printf("  vaulty set RALLY_%s_CLIENT_SECRET --value <your-client-secret> --domains auth.atlassian.com\n", upperName(providerName))
+		fmt.Printf("  vaulty set RALLY_%s_CLIENT_ID --value <your-client-id> --domains %s\n", upperName(providerName), authDomain)
+		fmt.Printf("  vaulty set RALLY_%s_CLIENT_SECRET --value <your-client-secret> --domains %s\n", upperName(providerName), authDomain)
 		fmt.Println("")
 		fmt.Println("Then run connect via vaulty exec:")
 		fmt.Printf("  vaulty exec --secrets RALLY_%s_CLIENT_ID,RALLY_%s_CLIENT_SECRET -- rally connect %s\n",
