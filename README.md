@@ -45,21 +45,21 @@ browser) or with **OAuth**.
 
 ### Option A — API key (recommended for personal use)
 
-Create a personal token in the provider's settings, store it in Vaulty, and
-connect with `--api-key`. No OAuth app or callback URL required.
+Create a personal token in the provider's settings, then connect with
+`--api-key`. Rally **prompts for the key** (hidden), verifies it, and stores it
+in Vaulty for you — no OAuth app, no callback URL, no manual `vaulty set`.
 
 ```bash
 # Linear — Settings → API → Personal API keys (key starts with lin_api_)
-vaulty set RALLY_LINEAR_TOKEN --value lin_api_xxx --domains api.linear.app
-vaulty exec --secrets RALLY_LINEAR_TOKEN -- rally connect linear --api-key
+rally connect linear --api-key
 
 # Jira — id.atlassian.com → Security → API tokens (needs your email + site)
-vaulty set RALLY_JIRA_TOKEN --value <api-token> --domains your-co.atlassian.net
-vaulty exec --secrets RALLY_JIRA_TOKEN -- \
-  rally connect jira --api-key --email you@your-co.com --site your-co.atlassian.net
+rally connect jira --api-key --email you@your-co.com --site your-co.atlassian.net
 ```
 
-`connect --api-key` verifies the token works before saving the connection.
+You'll be prompted to paste the key; it's verified against the API and saved to
+Vaulty (never to disk). The key can also be piped (`echo $KEY | rally connect
+linear --api-key`) or supplied via `vaulty exec --secrets RALLY_LINEAR_TOKEN`.
 
 ### Option B — OAuth (for shared/multi-user apps)
 

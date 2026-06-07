@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"net/http"
@@ -13,7 +14,23 @@ import (
 	"github.com/djtouchette/rally/internal/provider"
 	"github.com/djtouchette/rally/internal/store"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
+
+// promptSecret reads a secret from the terminal without echoing it. When stdin
+// is not a terminal (e.g. piped: `echo $KEY | rally connect ... --api-key`) it
+// reads a single line instead.
+func promptSecret(prompt string) (string, error) {
+	fmt.Fprint(os.Stderr, prompt)
+	fd := int(os.Stdin.Fd())
+	if term.IsTerminal(fd) {
+		b, err := term.ReadPassword(fd)
+		fmt.Fprintln(os.Stderr)
+		return string(b), err
+	}
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	return line, err
+}
 
 func newConnectCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -222,27 +239,47 @@ func runConnectAPIKey(cmd *cobra.Command, providerName string, prov provider.Pro
 		tokenDomain = site
 	}
 
-	token := os.Getenv("RALLY_" + upperName(providerName) + "_TOKEN")
+	secretName := "RALLY_" + upperName(providerName) + "_TOKEN"
+
+	// The key may already be in the environment (when run via `vaulty exec`);
+	// otherwise prompt for it and we'll store it in vaulty ourselves.
+	token := os.Getenv(secretName)
+	fromEnv := token != ""
 	if token == "" {
-		fmt.Println("Missing API key.")
-		fmt.Println("\nCreate one in your provider's settings, store it in vaulty, then connect:")
-		fmt.Printf("  vaulty set RALLY_%s_TOKEN --value <your-api-key> --domains %s\n", upperName(providerName), tokenDomain)
-		fmt.Printf("  vaulty exec --secrets RALLY_%s_TOKEN -- rally connect %s --api-key", upperName(providerName), providerName)
-		if providerName == "jira" {
-			fmt.Printf(" --email %s --site %s", email, site)
+		if !hasVaulty() {
+			fmt.Println("vaulty not found — it's required to store the API key securely.")
+			fmt.Printf("Install vaulty, or store the key yourself and run via exec:\n")
+			fmt.Printf("  vaulty set %s --value <key> --domains %s\n", secretName, tokenDomain)
+			fmt.Printf("  vaulty exec --secrets %s -- rally connect %s --api-key\n", secretName, providerName)
+			return fmt.Errorf("vaulty required for API-key storage")
 		}
-		fmt.Println()
-		return fmt.Errorf("RALLY_%s_TOKEN not in environment", upperName(providerName))
+		entered, err := promptSecret(fmt.Sprintf("Paste your %s API key: ", providerName))
+		if err != nil {
+			return fmt.Errorf("reading API key: %w", err)
+		}
+		token = strings.TrimSpace(entered)
+		if token == "" {
+			return fmt.Errorf("no API key entered")
+		}
 	}
 
 	creds := provider.Credentials{Method: provider.AuthAPIKey, Token: token, Email: email, Site: site}
 
-	// Verify the key works by fetching a single ticket.
+	// Verify the key works by fetching a single ticket before storing anything.
 	fmt.Printf("Verifying %s API key...\n", providerName)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if _, err := prov.FetchAssigned(ctx, creds, provider.FetchOpts{MaxResults: 1}); err != nil {
 		return fmt.Errorf("API key verification failed: %w", err)
+	}
+
+	// Store the verified key in vaulty (only when we prompted for it — if it
+	// came from the environment it is already managed by vaulty).
+	if !fromEnv {
+		if err := vaultySet(secretName, token, tokenDomain); err != nil {
+			return fmt.Errorf("storing %s in vaulty: %w", secretName, err)
+		}
+		fmt.Printf("Stored %s in vaulty.\n", secretName)
 	}
 
 	// Record the connection (no secrets — safe to commit).
