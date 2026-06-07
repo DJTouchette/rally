@@ -18,10 +18,13 @@ import (
 func newConnectCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "connect <provider>",
-		Short: "Connect to a provider via OAuth and store tokens in vaulty",
+		Short: "Connect to a provider via OAuth, or --api-key for a personal token",
 		Args:  cobra.ExactArgs(1),
 		RunE:  runConnect,
 	}
+	cmd.Flags().Bool("api-key", false, "Connect with a personal API key/token instead of OAuth (no app registration needed)")
+	cmd.Flags().String("email", "", "Jira account email (required for Jira --api-key)")
+	cmd.Flags().String("site", "", "Jira site host, e.g. co.atlassian.net (required for Jira --api-key)")
 	return cmd
 }
 
@@ -31,6 +34,10 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	prov, err := provider.New(providerName)
 	if err != nil {
 		return err
+	}
+
+	if apiKey, _ := cmd.Flags().GetBool("api-key"); apiKey {
+		return runConnectAPIKey(cmd, providerName, prov)
 	}
 
 	// Read OAuth client credentials from environment (injected by vaulty exec)
@@ -194,6 +201,82 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("\nConnected to %s successfully.\n", providerName)
+	fmt.Println("\nTo sync tickets, run:")
+	fmt.Printf("  vaulty exec --secrets RALLY_%s_TOKEN -- rally sync\n", upperName(providerName))
+	return nil
+}
+
+// runConnectAPIKey connects using a personal API key/token (no OAuth app). The
+// key is expected to already be in vaulty as RALLY_<PROVIDER>_TOKEN; this
+// verifies it works and records the connection.
+func runConnectAPIKey(cmd *cobra.Command, providerName string, prov provider.Provider) error {
+	email, _ := cmd.Flags().GetString("email")
+	site, _ := cmd.Flags().GetString("site")
+
+	if providerName == "jira" && (email == "" || site == "") {
+		return fmt.Errorf("jira --api-key needs --email and --site (e.g. --email you@co.com --site co.atlassian.net)")
+	}
+
+	tokenDomain := "api.linear.app"
+	if providerName == "jira" {
+		tokenDomain = site
+	}
+
+	token := os.Getenv("RALLY_" + upperName(providerName) + "_TOKEN")
+	if token == "" {
+		fmt.Println("Missing API key.")
+		fmt.Println("\nCreate one in your provider's settings, store it in vaulty, then connect:")
+		fmt.Printf("  vaulty set RALLY_%s_TOKEN --value <your-api-key> --domains %s\n", upperName(providerName), tokenDomain)
+		fmt.Printf("  vaulty exec --secrets RALLY_%s_TOKEN -- rally connect %s --api-key", upperName(providerName), providerName)
+		if providerName == "jira" {
+			fmt.Printf(" --email %s --site %s", email, site)
+		}
+		fmt.Println()
+		return fmt.Errorf("RALLY_%s_TOKEN not in environment", upperName(providerName))
+	}
+
+	creds := provider.Credentials{Method: provider.AuthAPIKey, Token: token, Email: email, Site: site}
+
+	// Verify the key works by fetching a single ticket.
+	fmt.Printf("Verifying %s API key...\n", providerName)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if _, err := prov.FetchAssigned(ctx, creds, provider.FetchOpts{MaxResults: 1}); err != nil {
+		return fmt.Errorf("API key verification failed: %w", err)
+	}
+
+	// Record the connection (no secrets — safe to commit).
+	cfg, _, err := store.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+	cfg.AddConnection(store.Connection{
+		Provider: providerName,
+		Auth:     provider.AuthAPIKey,
+		Email:    email,
+		Site:     site,
+	})
+	secret := store.Secret{
+		Name:        "RALLY_" + upperName(providerName) + "_TOKEN",
+		Description: providerName + " API token",
+		Domains:     []string{tokenDomain},
+		Required:    true,
+	}
+	exists := false
+	for _, s := range cfg.Secrets {
+		if s.Name == secret.Name {
+			exists = true
+			break
+		}
+	}
+	if !exists {
+		cfg.Secrets = append(cfg.Secrets, secret)
+	}
+	if err := store.SaveConfig(cfg); err != nil {
+		return fmt.Errorf("saving config: %w", err)
+	}
+
+	fmt.Printf("\nConnected to %s via API key.\n", providerName)
 	fmt.Println("\nTo sync tickets, run:")
 	fmt.Printf("  vaulty exec --secrets RALLY_%s_TOKEN -- rally sync\n", upperName(providerName))
 	return nil

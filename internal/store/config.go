@@ -18,16 +18,19 @@ type Config struct {
 type Connection struct {
 	Provider string `yaml:"provider"`
 	Project  string `yaml:"project,omitempty"`
-	CloudID  string `yaml:"cloud_id,omitempty"` // Jira cloud site ID
+	CloudID  string `yaml:"cloud_id,omitempty"` // Jira cloud site ID (OAuth)
+	Auth     string `yaml:"auth,omitempty"`     // "oauth" (default) or "api_key"
+	Email    string `yaml:"email,omitempty"`    // Jira API-token Basic-auth email
+	Site     string `yaml:"site,omitempty"`     // Jira site host for API-token mode
 }
 
 // Secret declares a secret that rally needs, with vaulty policy hints.
 type Secret struct {
-	Name        string   `yaml:"name"`                  // env var name, e.g. RALLY_JIRA_TOKEN
-	Description string   `yaml:"description"`           // human-readable purpose
-	Domains     []string `yaml:"domains,omitempty"`      // vaulty allowed domains
-	Commands    []string `yaml:"commands,omitempty"`     // vaulty allowed commands
-	Required    bool     `yaml:"required"`               // must be present for the provider to work
+	Name        string   `yaml:"name"`               // env var name, e.g. RALLY_JIRA_TOKEN
+	Description string   `yaml:"description"`        // human-readable purpose
+	Domains     []string `yaml:"domains,omitempty"`  // vaulty allowed domains
+	Commands    []string `yaml:"commands,omitempty"` // vaulty allowed commands
+	Required    bool     `yaml:"required"`           // must be present for the provider to work
 }
 
 // configSearchPaths returns the locations to search for config, in priority order.

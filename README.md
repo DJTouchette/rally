@@ -40,6 +40,29 @@ rally done PROJ-123
 
 ## Setting up a provider (one-time)
 
+You can authenticate either with a **personal API key** (simplest — no app, no
+browser) or with **OAuth**.
+
+### Option A — API key (recommended for personal use)
+
+Create a personal token in the provider's settings, store it in Vaulty, and
+connect with `--api-key`. No OAuth app or callback URL required.
+
+```bash
+# Linear — Settings → API → Personal API keys (key starts with lin_api_)
+vaulty set RALLY_LINEAR_TOKEN --value lin_api_xxx --domains api.linear.app
+vaulty exec --secrets RALLY_LINEAR_TOKEN -- rally connect linear --api-key
+
+# Jira — id.atlassian.com → Security → API tokens (needs your email + site)
+vaulty set RALLY_JIRA_TOKEN --value <api-token> --domains your-co.atlassian.net
+vaulty exec --secrets RALLY_JIRA_TOKEN -- \
+  rally connect jira --api-key --email you@your-co.com --site your-co.atlassian.net
+```
+
+`connect --api-key` verifies the token works before saving the connection.
+
+### Option B — OAuth (for shared/multi-user apps)
+
 Rally authenticates via **OAuth**, so you first create an OAuth app on the
 provider to get a client ID and secret. Both providers require the callback URL
 to match exactly, so rally listens on a **fixed** port — register this redirect

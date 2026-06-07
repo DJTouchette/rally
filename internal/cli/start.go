@@ -82,8 +82,16 @@ func runTransition(ticketID string, status model.Status, localOnly bool) error {
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 			} else {
+				creds := provider.Credentials{Method: provider.AuthOAuth, Token: token}
+				if cfg, _, cfgErr := store.LoadConfig(); cfgErr == nil {
+					if conn := cfg.FindConnection(target.Provider); conn != nil {
+						creds.Method = conn.Auth
+						creds.Email = conn.Email
+						creds.Site = conn.Site
+					}
+				}
 				ctx := context.Background()
-				if err := prov.UpdateStatus(ctx, token, target.ProviderID, status); err != nil {
+				if err := prov.UpdateStatus(ctx, creds, target.ProviderID, status); err != nil {
 					fmt.Fprintf(os.Stderr, "warning: could not push status to %s: %v\n", target.Provider, err)
 				} else {
 					fmt.Printf("Pushed status to %s.\n", target.Provider)

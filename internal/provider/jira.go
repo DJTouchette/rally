@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +13,28 @@ import (
 
 	"github.com/djtouchette/rally/internal/model"
 )
+
+// jiraBase returns the REST API base URL and Authorization header value for the
+// given credentials. OAuth uses api.atlassian.com/ex/jira/<cloudID> with Bearer;
+// API-token mode uses the site host directly with Basic auth (email:token).
+func (j *Jira) jiraBase(ctx context.Context, creds Credentials) (baseURL, authHeader string, err error) {
+	if creds.IsAPIKey() {
+		if creds.Site == "" || creds.Email == "" {
+			return "", "", fmt.Errorf("jira API-token auth requires an email and site (e.g. --email you@co.com --site co.atlassian.net)")
+		}
+		base := creds.Site
+		if !strings.Contains(base, "://") {
+			base = "https://" + base
+		}
+		auth := "Basic " + base64.StdEncoding.EncodeToString([]byte(creds.Email+":"+creds.Token))
+		return base, auth, nil
+	}
+	cloudID, err := j.fetchCloudID(ctx, creds.Token)
+	if err != nil {
+		return "", "", fmt.Errorf("fetching cloud ID: %w", err)
+	}
+	return "https://api.atlassian.com/ex/jira/" + cloudID, "Bearer " + creds.Token, nil
+}
 
 // Jira implements the Provider interface for Atlassian Jira Cloud.
 type Jira struct{}
@@ -136,10 +159,10 @@ func (j *Jira) RefreshToken(ctx context.Context, cfg OAuthConfig, refreshToken s
 	return ts, nil
 }
 
-func (j *Jira) FetchAssigned(ctx context.Context, token string, opts FetchOpts) ([]model.Ticket, error) {
-	cloudID, err := j.fetchCloudID(ctx, token)
+func (j *Jira) FetchAssigned(ctx context.Context, creds Credentials, opts FetchOpts) ([]model.Ticket, error) {
+	base, authHeader, err := j.jiraBase(ctx, creds)
 	if err != nil {
-		return nil, fmt.Errorf("fetching cloud ID: %w", err)
+		return nil, err
 	}
 
 	jql := "assignee = currentUser() AND statusCategory != Done ORDER BY priority ASC, created ASC"
@@ -156,14 +179,14 @@ func (j *Jira) FetchAssigned(ctx context.Context, token string, opts FetchOpts) 
 	startAt := 0
 
 	for {
-		apiURL := fmt.Sprintf("https://api.atlassian.com/ex/jira/%s/rest/api/3/search?jql=%s&startAt=%d&maxResults=%d&fields=summary,description,status,priority,issuetype,project,labels,creator,created,updated,duedate,parent",
-			cloudID, url.QueryEscape(jql), startAt, pageSize)
+		apiURL := fmt.Sprintf("%s/rest/api/3/search?jql=%s&startAt=%d&maxResults=%d&fields=summary,description,status,priority,issuetype,project,labels,creator,created,updated,duedate,parent",
+			base, url.QueryEscape(jql), startAt, pageSize)
 
 		req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 		if err != nil {
 			return nil, fmt.Errorf("creating search request: %w", err)
 		}
-		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Authorization", authHeader)
 		req.Header.Set("Accept", "application/json")
 
 		resp, err := http.DefaultClient.Do(req)
@@ -199,21 +222,34 @@ func (j *Jira) FetchAssigned(ctx context.Context, token string, opts FetchOpts) 
 	return tickets, nil
 }
 
-func (j *Jira) UpdateStatus(ctx context.Context, token string, providerID string, status model.Status) error {
-	// providerID format: "cloudID:issueID"
-	parts := strings.SplitN(providerID, ":", 2)
-	if len(parts) != 2 {
-		return fmt.Errorf("invalid provider ID %q — expected cloudID:issueID", providerID)
+func (j *Jira) UpdateStatus(ctx context.Context, creds Credentials, providerID string, status model.Status) error {
+	// Resolve the base URL, auth header, and issue ID. In OAuth mode the
+	// providerID is "cloudID:issueID"; in API-token mode it is just the issue ID
+	// (sync only prefixes the cloud ID for OAuth connections).
+	var base, authHeader, issueID string
+	if creds.IsAPIKey() {
+		b, a, err := j.jiraBase(ctx, creds)
+		if err != nil {
+			return err
+		}
+		base, authHeader, issueID = b, a, providerID
+	} else {
+		parts := strings.SplitN(providerID, ":", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("invalid provider ID %q — expected cloudID:issueID", providerID)
+		}
+		base = "https://api.atlassian.com/ex/jira/" + parts[0]
+		authHeader = "Bearer " + creds.Token
+		issueID = parts[1]
 	}
-	cloudID, issueID := parts[0], parts[1]
 
 	// Get available transitions for this issue
-	transURL := fmt.Sprintf("https://api.atlassian.com/ex/jira/%s/rest/api/3/issue/%s/transitions", cloudID, issueID)
+	transURL := fmt.Sprintf("%s/rest/api/3/issue/%s/transitions", base, issueID)
 	req, err := http.NewRequestWithContext(ctx, "GET", transURL, nil)
 	if err != nil {
 		return fmt.Errorf("creating transitions request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Authorization", authHeader)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
@@ -274,7 +310,7 @@ func (j *Jira) UpdateStatus(ctx context.Context, token string, providerID string
 	if err != nil {
 		return fmt.Errorf("creating transition request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Authorization", authHeader)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err = http.DefaultClient.Do(req)
@@ -565,26 +601,26 @@ type jiraSearchResult struct {
 }
 
 type jiraIssue struct {
-	ID     string    `json:"id"`
-	Key    string    `json:"key"`
-	Self   string    `json:"self"`
+	ID     string     `json:"id"`
+	Key    string     `json:"key"`
+	Self   string     `json:"self"`
 	Fields jiraFields `json:"fields"`
 }
 
 type jiraFields struct {
-	Summary   string          `json:"summary"`
+	Summary     string          `json:"summary"`
 	Description json.RawMessage `json:"description"` // ADF format
-	Status    jiraStatus      `json:"status"`
-	Priority  jiraPriority    `json:"priority"`
-	IssueType jiraIssueType   `json:"issuetype"`
-	Project   jiraProject     `json:"project"`
-	Labels    []string        `json:"labels"`
-	Assignee  jiraPerson      `json:"assignee"`
-	Creator   jiraPerson      `json:"creator"`
-	Parent    *jiraParent     `json:"parent"`
-	Created   string          `json:"created"`
-	Updated   string          `json:"updated"`
-	DueDate   string          `json:"duedate"`
+	Status      jiraStatus      `json:"status"`
+	Priority    jiraPriority    `json:"priority"`
+	IssueType   jiraIssueType   `json:"issuetype"`
+	Project     jiraProject     `json:"project"`
+	Labels      []string        `json:"labels"`
+	Assignee    jiraPerson      `json:"assignee"`
+	Creator     jiraPerson      `json:"creator"`
+	Parent      *jiraParent     `json:"parent"`
+	Created     string          `json:"created"`
+	Updated     string          `json:"updated"`
+	DueDate     string          `json:"duedate"`
 }
 
 type jiraStatus struct {

@@ -102,6 +102,16 @@ func (l *Linear) tokenRequest(ctx context.Context, body url.Values) (*TokenSet, 
 	}, nil
 }
 
+// linearAuthHeader builds the Authorization header value. Linear OAuth tokens
+// use the Bearer scheme; personal API keys are sent as the raw key value with
+// NO "Bearer" prefix — sending Bearer with an API key fails authentication.
+func linearAuthHeader(creds Credentials) string {
+	if creds.IsAPIKey() {
+		return creds.Token
+	}
+	return "Bearer " + creds.Token
+}
+
 // --- GraphQL types ---
 
 type linearState struct {
@@ -157,7 +167,7 @@ const linearAssignedQuery = `query($after: String, $first: Int!, $filter: IssueF
   }
 }`
 
-func (l *Linear) FetchAssigned(ctx context.Context, token string, opts FetchOpts) ([]model.Ticket, error) {
+func (l *Linear) FetchAssigned(ctx context.Context, creds Credentials, opts FetchOpts) ([]model.Ticket, error) {
 	max := opts.MaxResults
 	if max <= 0 {
 		max = 200
@@ -197,7 +207,7 @@ func (l *Linear) FetchAssigned(ctx context.Context, token string, opts FetchOpts
 		if after != nil {
 			vars["after"] = *after
 		}
-		if err := l.graphql(ctx, token, linearAssignedQuery, vars, &resp); err != nil {
+		if err := l.graphql(ctx, creds, linearAssignedQuery, vars, &resp); err != nil {
 			return nil, err
 		}
 
@@ -259,7 +269,7 @@ const (
 }`
 )
 
-func (l *Linear) UpdateStatus(ctx context.Context, token string, providerID string, status model.Status) error {
+func (l *Linear) UpdateStatus(ctx context.Context, creds Credentials, providerID string, status model.Status) error {
 	// Linear workflow states are per-team and identified by UUID, so we look up
 	// the issue's team states and pick one whose type matches the target status.
 	var statesResp struct {
@@ -275,7 +285,7 @@ func (l *Linear) UpdateStatus(ctx context.Context, token string, providerID stri
 			} `json:"team"`
 		} `json:"issue"`
 	}
-	if err := l.graphql(ctx, token, linearIssueStatesQuery, map[string]any{"id": providerID}, &statesResp); err != nil {
+	if err := l.graphql(ctx, creds, linearIssueStatesQuery, map[string]any{"id": providerID}, &statesResp); err != nil {
 		return err
 	}
 
@@ -300,7 +310,7 @@ func (l *Linear) UpdateStatus(ctx context.Context, token string, providerID stri
 			Success bool `json:"success"`
 		} `json:"issueUpdate"`
 	}
-	if err := l.graphql(ctx, token, linearIssueUpdateMutation, map[string]any{"id": providerID, "stateId": stateID}, &updateResp); err != nil {
+	if err := l.graphql(ctx, creds, linearIssueUpdateMutation, map[string]any{"id": providerID, "stateId": stateID}, &updateResp); err != nil {
 		return err
 	}
 	if !updateResp.IssueUpdate.Success {
@@ -311,7 +321,7 @@ func (l *Linear) UpdateStatus(ctx context.Context, token string, providerID stri
 
 // graphql executes a Linear GraphQL request and unmarshals the "data" field
 // into out.
-func (l *Linear) graphql(ctx context.Context, token, query string, vars map[string]any, out any) error {
+func (l *Linear) graphql(ctx context.Context, creds Credentials, query string, vars map[string]any, out any) error {
 	payload, err := json.Marshal(map[string]any{"query": query, "variables": vars})
 	if err != nil {
 		return fmt.Errorf("marshaling graphql request: %w", err)
@@ -322,7 +332,7 @@ func (l *Linear) graphql(ctx context.Context, token, query string, vars map[stri
 		return fmt.Errorf("creating graphql request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Authorization", linearAuthHeader(creds))
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

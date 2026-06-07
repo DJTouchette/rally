@@ -59,8 +59,10 @@ func TestNormalizeIssue(t *testing.T) {
 		Fields: jiraFields{
 			Summary: "Fix the thing",
 			Status: jiraStatus{
-				Name:           "In Progress",
-				StatusCategory: struct{ Key string `json:"key"` }{Key: "indeterminate"},
+				Name: "In Progress",
+				StatusCategory: struct {
+					Key string `json:"key"`
+				}{Key: "indeterminate"},
 			},
 			Priority:  jiraPriority{Name: "High"},
 			IssueType: jiraIssueType{Name: "Bug"},
@@ -284,8 +286,10 @@ func TestFetchAssigned(t *testing.T) {
 						Fields: jiraFields{
 							Summary: "Test issue",
 							Status: jiraStatus{
-								Name:           "To Do",
-								StatusCategory: struct{ Key string `json:"key"` }{Key: "new"},
+								Name: "To Do",
+								StatusCategory: struct {
+									Key string `json:"key"`
+								}{Key: "new"},
 							},
 							Priority:  jiraPriority{Name: "Medium"},
 							IssueType: jiraIssueType{Name: "Task"},
@@ -317,8 +321,10 @@ func TestFetchAssigned(t *testing.T) {
 		Fields: jiraFields{
 			Summary: "Test issue",
 			Status: jiraStatus{
-				Name:           "To Do",
-				StatusCategory: struct{ Key string `json:"key"` }{Key: "new"},
+				Name: "To Do",
+				StatusCategory: struct {
+					Key string `json:"key"`
+				}{Key: "new"},
 			},
 			Priority:  jiraPriority{Name: "Medium"},
 			IssueType: jiraIssueType{Name: "Task"},

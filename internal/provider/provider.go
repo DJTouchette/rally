@@ -23,11 +23,30 @@ type Provider interface {
 	RefreshToken(ctx context.Context, cfg OAuthConfig, refreshToken string) (*TokenSet, error)
 
 	// FetchAssigned returns tickets assigned to the authenticated user.
-	FetchAssigned(ctx context.Context, token string, opts FetchOpts) ([]model.Ticket, error)
+	FetchAssigned(ctx context.Context, creds Credentials, opts FetchOpts) ([]model.Ticket, error)
 
 	// UpdateStatus pushes a status change back to the provider.
-	UpdateStatus(ctx context.Context, token string, providerID string, status model.Status) error
+	UpdateStatus(ctx context.Context, creds Credentials, providerID string, status model.Status) error
 }
+
+// AuthMethod values identify how a connection authenticates.
+const (
+	AuthOAuth  = "oauth"   // OAuth 2.0 access token (default)
+	AuthAPIKey = "api_key" // personal API key / token
+)
+
+// Credentials carry how to authenticate a single provider request. OAuth is the
+// default; API-key mode uses a personal token (Linear) or an API token with
+// Basic auth (Jira, which then also needs Email + Site).
+type Credentials struct {
+	Method string // AuthOAuth (default) or AuthAPIKey
+	Token  string // OAuth access token, or the API key/token
+	Email  string // Jira API-token Basic-auth email (api_key mode)
+	Site   string // Jira site host, e.g. acme.atlassian.net (api_key mode)
+}
+
+// IsAPIKey reports whether these credentials use a static API key/token.
+func (c Credentials) IsAPIKey() bool { return c.Method == AuthAPIKey }
 
 // OAuthConfig holds the client credentials for a provider.
 type OAuthConfig struct {
@@ -46,8 +65,8 @@ type TokenSet struct {
 
 // FetchOpts holds optional parameters for fetching tickets.
 type FetchOpts struct {
-	Project string // filter to a specific project key
-	MaxResults int // limit results (0 = provider default)
+	Project    string // filter to a specific project key
+	MaxResults int    // limit results (0 = provider default)
 }
 
 // New creates a Provider by name.

@@ -122,7 +122,7 @@ func TestLinearFetchAssigned(t *testing.T) {
 	defer func() { linearAPIURL = orig }()
 
 	l := &Linear{}
-	tickets, err := l.FetchAssigned(context.Background(), "tok123", FetchOpts{})
+	tickets, err := l.FetchAssigned(context.Background(), Credentials{Token: "tok123"}, FetchOpts{})
 	if err != nil {
 		t.Fatalf("FetchAssigned: %v", err)
 	}
@@ -156,6 +156,36 @@ func TestLinearFetchAssigned(t *testing.T) {
 	}
 }
 
+func TestLinearAPIKeyAuthHeader(t *testing.T) {
+	// OAuth uses the Bearer scheme; a personal API key is sent raw.
+	if got := linearAuthHeader(Credentials{Method: AuthOAuth, Token: "abc"}); got != "Bearer abc" {
+		t.Errorf("oauth header = %q, want Bearer abc", got)
+	}
+	if got := linearAuthHeader(Credentials{Method: AuthAPIKey, Token: "lin_api_xyz"}); got != "lin_api_xyz" {
+		t.Errorf("api-key header = %q, want raw key (no Bearer)", got)
+	}
+
+	// End to end: an API-key fetch must send the raw key.
+	var sawAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"data":{"viewer":{"assignedIssues":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":""}}}}}`)
+	}))
+	defer srv.Close()
+	orig := linearAPIURL
+	linearAPIURL = srv.URL
+	defer func() { linearAPIURL = orig }()
+
+	l := &Linear{}
+	if _, err := l.FetchAssigned(context.Background(), Credentials{Method: AuthAPIKey, Token: "lin_api_xyz"}, FetchOpts{}); err != nil {
+		t.Fatalf("FetchAssigned: %v", err)
+	}
+	if sawAuth != "lin_api_xyz" {
+		t.Errorf("API-key request Authorization = %q, want raw key", sawAuth)
+	}
+}
+
 func TestLinearUpdateStatus(t *testing.T) {
 	var sentStateID string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -184,7 +214,7 @@ func TestLinearUpdateStatus(t *testing.T) {
 	defer func() { linearAPIURL = orig }()
 
 	l := &Linear{}
-	if err := l.UpdateStatus(context.Background(), "tok", "uuid-1", model.StatusInProgress); err != nil {
+	if err := l.UpdateStatus(context.Background(), Credentials{Token: "tok"}, "uuid-1", model.StatusInProgress); err != nil {
 		t.Fatalf("UpdateStatus: %v", err)
 	}
 	if sentStateID != "s-started" {
@@ -192,7 +222,7 @@ func TestLinearUpdateStatus(t *testing.T) {
 	}
 
 	// A status with no matching state type should error clearly.
-	if err := l.UpdateStatus(context.Background(), "tok", "uuid-1", model.StatusCancelled); err == nil {
+	if err := l.UpdateStatus(context.Background(), Credentials{Token: "tok"}, "uuid-1", model.StatusCancelled); err == nil {
 		t.Error("expected error when no workflow state matches the target status")
 	}
 }

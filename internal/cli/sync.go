@@ -63,8 +63,14 @@ func runSync(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
+		creds := provider.Credentials{
+			Method: conn.Auth,
+			Token:  token,
+			Email:  conn.Email,
+			Site:   conn.Site,
+		}
 		opts := provider.FetchOpts{Project: conn.Project}
-		tickets, err := prov.FetchAssigned(ctx, token, opts)
+		tickets, err := prov.FetchAssigned(ctx, creds, opts)
 		if err != nil {
 			return fmt.Errorf("fetching %s tickets: %w", conn.Provider, err)
 		}
