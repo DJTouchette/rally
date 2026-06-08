@@ -14,11 +14,9 @@ type SyncState struct {
 	Tickets  map[string]string `json:"tickets"` // ticket ID -> sync hash
 }
 
-const stateFile = ".rally/state.json"
-
 // LoadState loads sync state from disk.
 func LoadState() (*SyncState, error) {
-	data, err := os.ReadFile(stateFile)
+	data, err := os.ReadFile(statePath())
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &SyncState{Tickets: make(map[string]string)}, nil
@@ -39,6 +37,7 @@ func LoadState() (*SyncState, error) {
 
 // SaveState writes sync state to disk.
 func SaveState(state *SyncState) error {
+	stateFile := statePath()
 	dir := filepath.Dir(stateFile)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("creating state directory: %w", err)
@@ -58,5 +57,5 @@ func SaveState(state *SyncState) error {
 
 // TicketsDir returns the directory where synced ticket markdown files live.
 func TicketsDir() string {
-	return ".rally/tickets"
+	return ticketsPath()
 }

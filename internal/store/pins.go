@@ -11,8 +11,6 @@ import (
 	"github.com/djtouchette/rally/internal/model"
 )
 
-const pinsFile = ".rally/pins.json"
-
 type pinsFileFormat struct {
 	Pins []model.Pin `json:"pins"`
 }
@@ -20,7 +18,7 @@ type pinsFileFormat struct {
 // LoadPins reads pinned tickets from disk, ordered oldest-first.
 // Returns an empty slice if the file does not exist.
 func LoadPins() ([]model.Pin, error) {
-	data, err := os.ReadFile(pinsFile)
+	data, err := os.ReadFile(pinsPath())
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -40,6 +38,7 @@ func LoadPins() ([]model.Pin, error) {
 
 // SavePins writes pinned tickets to disk.
 func SavePins(pins []model.Pin) error {
+	pinsFile := pinsPath()
 	dir := filepath.Dir(pinsFile)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("creating pins directory: %w", err)

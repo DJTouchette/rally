@@ -36,7 +36,7 @@ type Secret struct {
 // configSearchPaths returns the locations to search for config, in priority order.
 func configSearchPaths() []string {
 	paths := []string{
-		".rally/config.yaml",
+		configPath(),
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		paths = append(paths, filepath.Join(home, ".config", "rally", "config.yaml"))
@@ -62,7 +62,7 @@ func LoadConfig() (*Config, string, error) {
 
 // SaveConfig writes the config to the local project path (.rally/config.yaml).
 func SaveConfig(cfg *Config) error {
-	dir := ".rally"
+	dir := BaseDir()
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
