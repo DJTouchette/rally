@@ -277,7 +277,7 @@ func TestFetchAssigned(t *testing.T) {
 
 	// Mock the search endpoint
 	searchServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/ex/jira/cloud-123/rest/api/3/search" {
+		if r.URL.Path == "/ex/jira/cloud-123/rest/api/3/search/jql" {
 			result := jiraSearchResult{
 				Issues: []jiraIssue{
 					{
@@ -300,7 +300,7 @@ func TestFetchAssigned(t *testing.T) {
 						},
 					},
 				},
-				Total: 1,
+				IsLast: true,
 			}
 			json.NewEncoder(w).Encode(result)
 			return
@@ -345,7 +345,7 @@ func TestFetchAssigned(t *testing.T) {
 	// Verify search result can be parsed from JSON
 	data, _ := json.Marshal(jiraSearchResult{
 		Issues: []jiraIssue{issue},
-		Total:  1,
+		IsLast: true,
 	})
 	var parsed jiraSearchResult
 	if err := json.Unmarshal(data, &parsed); err != nil {

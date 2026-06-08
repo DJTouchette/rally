@@ -175,12 +175,23 @@ func (j *Jira) FetchAssigned(ctx context.Context, creds Credentials, opts FetchO
 		pageSize = opts.MaxResults
 	}
 
-	var tickets []model.Ticket
-	startAt := 0
+	const fields = "summary,description,status,priority,issuetype,project,labels,creator,created,updated,duedate,parent"
 
+	var tickets []model.Ticket
+	nextPageToken := ""
+
+	// Jira Cloud removed the offset-based GET /rest/api/3/search endpoint
+	// (CHANGE-2046). The replacement, /rest/api/3/search/jql, paginates with an
+	// opaque nextPageToken and signals the end with isLast (no startAt/total).
 	for {
-		apiURL := fmt.Sprintf("%s/rest/api/3/search?jql=%s&startAt=%d&maxResults=%d&fields=summary,description,status,priority,issuetype,project,labels,creator,created,updated,duedate,parent",
-			base, url.QueryEscape(jql), startAt, pageSize)
+		params := url.Values{}
+		params.Set("jql", jql)
+		params.Set("maxResults", fmt.Sprintf("%d", pageSize))
+		params.Set("fields", fields)
+		if nextPageToken != "" {
+			params.Set("nextPageToken", nextPageToken)
+		}
+		apiURL := fmt.Sprintf("%s/rest/api/3/search/jql?%s", base, params.Encode())
 
 		req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 		if err != nil {
@@ -209,14 +220,14 @@ func (j *Jira) FetchAssigned(ctx context.Context, creds Credentials, opts FetchO
 			tickets = append(tickets, j.normalizeIssue(issue))
 		}
 
-		startAt += len(searchResult.Issues)
-		if startAt >= searchResult.Total || len(searchResult.Issues) == 0 {
-			break
-		}
 		if opts.MaxResults > 0 && len(tickets) >= opts.MaxResults {
 			tickets = tickets[:opts.MaxResults]
 			break
 		}
+		if searchResult.IsLast || searchResult.NextPageToken == "" || len(searchResult.Issues) == 0 {
+			break
+		}
+		nextPageToken = searchResult.NextPageToken
 	}
 
 	return tickets, nil
@@ -594,10 +605,9 @@ func statusToJiraNameHint(s model.Status) string {
 // Jira API response types
 
 type jiraSearchResult struct {
-	Issues     []jiraIssue `json:"issues"`
-	StartAt    int         `json:"startAt"`
-	MaxResults int         `json:"maxResults"`
-	Total      int         `json:"total"`
+	Issues        []jiraIssue `json:"issues"`
+	NextPageToken string      `json:"nextPageToken"`
+	IsLast        bool        `json:"isLast"`
 }
 
 type jiraIssue struct {

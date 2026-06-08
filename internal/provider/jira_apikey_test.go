@@ -36,7 +36,7 @@ func TestJiraAPIKeyFetchAssigned(t *testing.T) {
 					Updated:   "2026-04-01T10:00:00.000+0000",
 				},
 			}},
-			Total: 1,
+			IsLast: true,
 		})
 	}))
 	defer srv.Close()
@@ -59,9 +59,9 @@ func TestJiraAPIKeyFetchAssigned(t *testing.T) {
 		t.Errorf("priority = %q, want high", tickets[0].Priority)
 	}
 
-	// No cloud-ID indirection: path hits /rest/api/3/search directly.
-	if !strings.HasSuffix(sawPath, "/rest/api/3/search") {
-		t.Errorf("request path = %q, want .../rest/api/3/search", sawPath)
+	// No cloud-ID indirection: path hits /rest/api/3/search/jql directly.
+	if !strings.HasSuffix(sawPath, "/rest/api/3/search/jql") {
+		t.Errorf("request path = %q, want .../rest/api/3/search/jql", sawPath)
 	}
 	// Basic auth header = base64(email:token).
 	wantAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte("me@co.com:api-tok"))
